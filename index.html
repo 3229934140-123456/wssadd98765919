@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>肉类冷链温区稽核系统</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-content">
+            <div class="logo-section">
+                <div class="logo-icon">❄️</div>
+                <div>
+                    <h1>肉类冷链温区稽核系统</h1>
+                    <p class="subtitle">Cold Chain Temperature Zone Audit System</p>
+                </div>
+            </div>
+            <nav class="main-nav">
+                <button class="nav-btn active" data-page="list">运单列表</button>
+                <button class="nav-btn" data-page="detail">温区曲线</button>
+                <button class="nav-btn" data-page="audit">稽核结论</button>
+            </nav>
+            <div class="user-info">
+                <span class="user-role">质控主管</span>
+                <div class="user-avatar">张</div>
+            </div>
+        </div>
+    </header>
+
+    <main class="main-content">
+        <div id="page-list" class="page active">
+            <div class="page-header">
+                <h2>运单列表</h2>
+                <p class="page-desc">按条件筛选运单，查看约定温区及运输状态</p>
+            </div>
+
+            <div class="filter-card">
+                <div class="filter-row">
+                    <div class="filter-item">
+                        <label>客户名称</label>
+                        <select id="filter-customer">
+                            <option value="">全部客户</option>
+                            <option value="双汇食品">双汇食品</option>
+                            <option value="雨润集团">雨润集团</option>
+                            <option value="金锣肉制品">金锣肉制品</option>
+                            <option value="众品食业">众品食业</option>
+                        </select>
+                    </div>
+                    <div class="filter-item">
+                        <label>肉品类型</label>
+                        <select id="filter-meat-type">
+                            <option value="">全部类型</option>
+                            <option value="冷冻">冷冻肉品</option>
+                            <option value="冷藏">冷藏肉品</option>
+                            <option value="鲜肉">鲜肉类</option>
+                        </select>
+                    </div>
+                    <div class="filter-item">
+                        <label>车牌号码</label>
+                        <input type="text" id="filter-plate" placeholder="请输入车牌号">
+                    </div>
+                    <div class="filter-item">
+                        <label>发车日期</label>
+                        <input type="date" id="filter-date">
+                    </div>
+                </div>
+                <div class="filter-actions">
+                    <button class="btn btn-primary" onclick="applyFilters()">查询</button>
+                    <button class="btn btn-secondary" onclick="resetFilters()">重置</button>
+                </div>
+            </div>
+
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-icon total">📦</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-total">0</span>
+                        <span class="stat-label">运单总数</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon normal">✅</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-normal">0</span>
+                        <span class="stat-label">温区正常</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon warning">⚠️</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-warning">0</span>
+                        <span class="stat-label">轻微超限</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon danger">🚨</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-danger">0</span>
+                        <span class="stat-label">严重超限</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="table-card">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>运单号</th>
+                            <th>客户名称</th>
+                            <th>肉品类型</th>
+                            <th>约定温区</th>
+                            <th>车牌号码</th>
+                            <th>发车时间</th>
+                            <th>到达时间</th>
+                            <th>运输状态</th>
+                            <th>超温情况</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="waybill-list">
+                    </tbody>
+                </table>
+                <div class="table-footer">
+                    <span class="total-count">共 <span id="total-count">0</span> 条记录</span>
+                    <div class="pagination">
+                        <button class="page-btn" onclick="changePage(-1)">上一页</button>
+                        <span class="page-info">第 <span id="current-page">1</span> / <span id="total-pages">1</span> 页</span>
+                        <button class="page-btn" onclick="changePage(1)">下一页</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="page-detail" class="page">
+            <div class="page-header">
+                <button class="back-btn" onclick="navigateTo('list')">← 返回列表</button>
+                <div>
+                    <h2>温区曲线详情</h2>
+                    <p class="page-desc" id="detail-subtitle">运单详情 - 温度监控数据分析</p>
+                </div>
+            </div>
+
+            <div class="detail-summary">
+                <div class="summary-item">
+                    <span class="summary-label">运单号</span>
+                    <span class="summary-value" id="detail-waybill-no">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">客户名称</span>
+                    <span class="summary-value" id="detail-customer">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">肉品类型</span>
+                    <span class="summary-value" id="detail-meat-type">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">车牌号码</span>
+                    <span class="summary-value" id="detail-plate">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">约定温区</span>
+                    <span class="summary-value temp-zone" id="detail-temp-zone">-</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">运输时长</span>
+                    <span class="summary-value" id="detail-duration">-</span>
+                </div>
+            </div>
+
+            <div class="chart-card" id="chart-section">
+                <div class="chart-header">
+                    <h3>温度变化曲线</h3>
+                    <div class="chart-legend">
+                        <span class="legend-item"><span class="legend-dot temp-line"></span>车厢温度</span>
+                        <span class="legend-item"><span class="legend-dot upper-limit"></span>温度上限</span>
+                        <span class="legend-item"><span class="legend-dot lower-limit"></span>温度下限</span>
+                        <span class="legend-item"><span class="legend-dot door-open"></span>开门记录</span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="tempChart"></canvas>
+                </div>
+            </div>
+
+            <div class="timeline-section">
+                <h3>运输时间轴</h3>
+                <div class="timeline" id="timeline">
+                </div>
+            </div>
+
+            <div class="alerts-section">
+                <h3>超温记录</h3>
+                <div class="alerts-list" id="alerts-list">
+                </div>
+            </div>
+
+            <div class="detail-actions">
+                <button class="btn btn-secondary" onclick="navigateTo('list')">返回列表</button>
+                <button class="btn btn-primary" onclick="goToAudit()">开始稽核</button>
+            </div>
+        </div>
+
+        <div id="page-audit" class="page">
+            <div class="page-header">
+                <button class="back-btn" onclick="navigateTo('detail')">← 返回详情</button>
+                <div>
+                    <h2>稽核结论</h2>
+                    <p class="page-desc">记录稽核原因，生成稽核结论</p>
+                </div>
+            </div>
+
+            <div class="audit-form" id="audit-form">
+                <div class="form-section">
+                    <h3>基本信息</h3>
+                    <div class="form-grid">
+                        <div class="form-item">
+                            <label>运单号</label>
+                            <span class="form-value" id="audit-waybill-no">-</span>
+                        </div>
+                        <div class="form-item">
+                            <label>客户名称</label>
+                            <span class="form-value" id="audit-customer">-</span>
+                        </div>
+                        <div class="form-item">
+                            <label>肉品类型</label>
+                            <span class="form-value" id="audit-meat-type">-</span>
+                        </div>
+                        <div class="form-item">
+                            <label>车牌号码</label>
+                            <span class="form-value" id="audit-plate">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>超温情况汇总</h3>
+                    <div class="alert-summary">
+                        <div class="alert-summary-item mild">
+                            <span class="alert-count" id="mild-count">0</span>
+                            <span class="alert-label">轻微超限</span>
+                        </div>
+                        <div class="alert-summary-item severe">
+                            <span class="alert-count" id="severe-count">0</span>
+                            <span class="alert-label">严重超限</span>
+                        </div>
+                        <div class="alert-summary-item continuous">
+                            <span class="alert-count" id="continuous-count">0</span>
+                            <span class="alert-label">持续超限</span>
+                        </div>
+                        <div class="alert-summary-item total">
+                            <span class="alert-count" id="total-alert-count">0</span>
+                            <span class="alert-label">累计超温时长</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>稽核原因</h3>
+                    <div class="reason-options">
+                        <label class="reason-option">
+                            <input type="radio" name="audit-reason" value="设备波动">
+                            <span class="reason-icon">📡</span>
+                            <div class="reason-info">
+                                <span class="reason-title">设备波动</span>
+                                <span class="reason-desc">温控设备正常波动，属正常范围</span>
+                            </div>
+                        </label>
+                        <label class="reason-option">
+                            <input type="radio" name="audit-reason" value="装卸开门">
+                            <span class="reason-icon">🚪</span>
+                            <div class="reason-info">
+                                <span class="reason-title">装卸开门</span>
+                                <span class="reason-desc">装卸货时开门导致温度短暂上升</span>
+                            </div>
+                        </label>
+                        <label class="reason-option">
+                            <input type="radio" name="audit-reason" value="运输异常">
+                            <span class="reason-icon">⚠️</span>
+                            <div class="reason-info">
+                                <span class="reason-title">运输异常</span>
+                                <span class="reason-desc">运输过程中制冷设备故障或操作不当</span>
+                            </div>
+                        </label>
+                        <label class="reason-option">
+                            <input type="radio" name="audit-reason" value="无法判定">
+                            <span class="reason-icon">❓</span>
+                            <div class="reason-info">
+                                <span class="reason-title">无法判定</span>
+                                <span class="reason-desc">数据不完整或原因不明确</span>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>补充说明</h3>
+                    <textarea id="audit-remark" class="remark-textarea" placeholder="请输入稽核补充说明，详细描述超温原因分析及处理建议..."></textarea>
+                </div>
+
+                <div class="form-section">
+                    <h3>责任建议</h3>
+                    <div class="responsibility-options">
+                        <label class="resp-option">
+                            <input type="radio" name="responsibility" value="承运商责任">
+                            <span>承运商责任</span>
+                        </label>
+                        <label class="resp-option">
+                            <input type="radio" name="responsibility" value="发货方责任">
+                            <span>发货方责任</span>
+                        </label>
+                        <label class="resp-option">
+                            <input type="radio" name="responsibility" value="不可抗力">
+                            <span>不可抗力</span>
+                        </label>
+                        <label class="resp-option">
+                            <input type="radio" name="responsibility" value="无责任">
+                            <span>无责任</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>是否允许签收</h3>
+                    <div class="sign-options">
+                        <label class="sign-option allow">
+                            <input type="radio" name="sign-status" value="允许签收">
+                            <span class="sign-icon">✅</span>
+                            <span class="sign-text">允许签收</span>
+                        </label>
+                        <label class="sign-option reject">
+                            <input type="radio" name="sign-status" value="拒收">
+                            <span class="sign-icon">❌</span>
+                            <span class="sign-text">拒收</span>
+                        </label>
+                        <label class="sign-option conditional">
+                            <input type="radio" name="sign-status" value="有条件签收">
+                            <span class="sign-icon">⚠️</span>
+                            <span class="sign-text">有条件签收</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="navigateTo('detail')">取消</button>
+                    <button class="btn btn-primary" onclick="generateAuditReport()">生成稽核单</button>
+                </div>
+            </div>
+
+            <div class="audit-report" id="audit-report" style="display: none;">
+                <div class="report-header">
+                    <h3>温区稽核单</h3>
+                    <button class="btn btn-primary" onclick="downloadReport()">
+                        📄 下载稽核单
+                    </button>
+                </div>
+                <div class="report-content" id="report-content">
+                    <div class="report-title">
+                        <h2>肉类冷链运输温区稽核单</h2>
+                        <p class="report-no">稽核单号：<span id="report-no">-</span></p>
+                    </div>
+                    
+                    <div class="report-section">
+                        <h4>一、基本信息</h4>
+                        <table class="report-table">
+                            <tr>
+                                <th>运单号</th>
+                                <td id="report-waybill-no">-</td>
+                                <th>稽核日期</th>
+                                <td id="report-audit-date">-</td>
+                            </tr>
+                            <tr>
+                                <th>客户名称</th>
+                                <td id="report-customer">-</td>
+                                <th>肉品类型</th>
+                                <td id="report-meat-type">-</td>
+                            </tr>
+                            <tr>
+                                <th>车牌号码</th>
+                                <td id="report-plate">-</td>
+                                <th>约定温区</th>
+                                <td id="report-temp-zone">-</td>
+                            </tr>
+                            <tr>
+                                <th>发车时间</th>
+                                <td id="report-departure">-</td>
+                                <th>到达时间</th>
+                                <td id="report-arrival">-</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>二、超温情况统计</h4>
+                        <table class="report-table">
+                            <tr>
+                                <th>超温类型</th>
+                                <th>次数</th>
+                                <th>累计时长</th>
+                                <th>最高温度</th>
+                            </tr>
+                            <tr>
+                                <td>轻微超限</td>
+                                <td id="report-mild-count">0</td>
+                                <td id="report-mild-duration">0分钟</td>
+                                <td rowspan="3" id="report-max-temp">-</td>
+                            </tr>
+                            <tr>
+                                <td>严重超限</td>
+                                <td id="report-severe-count">0</td>
+                                <td id="report-severe-duration">0分钟</td>
+                            </tr>
+                            <tr>
+                                <td>持续超限</td>
+                                <td id="report-continuous-count">0</td>
+                                <td id="report-continuous-duration">0分钟</td>
+                            </tr>
+                        </table>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>三、温度曲线证据</h4>
+                        <div class="evidence-chart" id="evidence-chart-container">
+                            <canvas id="evidenceChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>四、稽核结论</h4>
+                        <div class="conclusion-box">
+                            <div class="conclusion-item">
+                                <span class="conclusion-label">稽核原因：</span>
+                                <span class="conclusion-value" id="report-reason">-</span>
+                            </div>
+                            <div class="conclusion-item">
+                                <span class="conclusion-label">责任建议：</span>
+                                <span class="conclusion-value" id="report-responsibility">-</span>
+                            </div>
+                            <div class="conclusion-item">
+                                <span class="conclusion-label">签收状态：</span>
+                                <span class="conclusion-value" id="report-sign-status">-</span>
+                            </div>
+                            <div class="conclusion-item">
+                                <span class="conclusion-label">补充说明：</span>
+                                <span class="conclusion-value" id="report-remark">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>五、稽核人员</h4>
+                        <div class="signatures">
+                            <div class="signature-item">
+                                <span>稽核人：</span>
+                                <span class="signature-name">张主管</span>
+                            </div>
+                            <div class="signature-item">
+                                <span>稽核日期：</span>
+                                <span id="report-sign-date">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
