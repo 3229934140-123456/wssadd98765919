@@ -299,7 +299,7 @@ function renderTempChart(waybill) {
             pointHitRadius: 20,
             alertIndex: idx
         });
-    };
+    });
 
     const datasets = [
         {
@@ -348,20 +348,40 @@ function renderTempChart(waybill) {
                 intersect: false
             },
             onClick: function(e, elements) {
-                if (elements.length > 0) {
+                if (!elements || elements.length === 0) return;
+                
+                let alertIndex = -1;
+                for (const el of elements) {
+                    const datasetIndex = el.datasetIndex;
+                    const dataset = tempChart.data.datasets[datasetIndex];
+                    if (dataset && dataset.alertIndex !== undefined) {
+                        const val = dataset.data[el.index];
+                        if (val !== null) {
+                            alertIndex = dataset.alertIndex;
+                            break;
+                        }
+                    }
+                }
+                
+                if (alertIndex < 0) {
                     const dataIndex = elements[0].index;
                     const dataPoint = tempData[dataIndex];
                     if (dataPoint && dataPoint.inAlert) {
                         const alerts = getAlerts(waybill.id);
-                        const alertIdx = alerts.findIndex(a => {
-                            const startTime = new Date(a.startTime).getTime();
-                            const endTime = new Date(a.endTime).getTime();
-                            return dataPoint.time.getTime() >= startTime && dataPoint.time.getTime() <= endTime;
-                        });
-                        if (alertIdx >= 0) {
-                            showAlertModal(alertIdx);
+                        const pointTime = dataPoint.time.getTime();
+                        for (let i = 0; i < alerts.length; i++) {
+                            const startTime = new Date(alerts[i].startTime).getTime();
+                            const endTime = new Date(alerts[i].endTime).getTime();
+                            if (pointTime >= startTime && pointTime <= endTime) {
+                                alertIndex = i;
+                                break;
+                            }
                         }
                     }
+                }
+                
+                if (alertIndex >= 0) {
+                    showAlertModal(alertIndex);
                 }
             },
             plugins: {
@@ -545,8 +565,11 @@ function showAlertModal(alertIndex) {
     document.getElementById('modal-alert-end').textContent = alert.endTime;
     document.getElementById('modal-alert-duration').textContent = alert.duration;
     document.getElementById('modal-alert-max').textContent = alert.maxTemp.toFixed(1) + '℃';
-    document.getElementById('modal-alert-avg').textContent = alert.avgTemp ? alert.avgTemp.toFixed(1) + '℃';
-    document.getElementById('modal-alert-desc').textContent = alert.description;
+    document.getElementById('modal-alert-avg').textContent = 
+        alert.avgTemp !== undefined && alert.avgTemp !== null 
+            ? alert.avgTemp.toFixed(1) + '℃' 
+            : '-';
+    document.getElementById('modal-alert-desc').textContent = alert.description || '暂无描述';
 
     const doorsHtml = alert.relatedDoors && alert.relatedDoors.length > 0
         ? alert.relatedDoors.map(door => `
@@ -620,12 +643,27 @@ function renderAuditForm() {
         historySection.style.display = 'none';
     }
 
-    if (!historyRecord) {
-        document.querySelectorAll('input[name="audit-reason"]').forEach(r => r.checked = false);
-        document.querySelectorAll('input[name="responsibility"]').forEach(r => r.checked = false);
-        document.querySelectorAll('input[name="sign-status"]').forEach(r => r.checked = false);
-        document.getElementById('audit-remark').value = '';
+    const hasFormValue = checkFormHasValue();
+    if (!hasFormValue && historyRecord) {
+        loadHistoryData();
+    } else if (!hasFormValue && !historyRecord) {
+        clearFormValues();
     }
+}
+
+function checkFormHasValue() {
+    const reasonChecked = document.querySelector('input[name="audit-reason"]:checked');
+    const respChecked = document.querySelector('input[name="responsibility"]:checked');
+    const signChecked = document.querySelector('input[name="sign-status"]:checked');
+    const remarkValue = document.getElementById('audit-remark').value.trim();
+    return reasonChecked || respChecked || signChecked || remarkValue;
+}
+
+function clearFormValues() {
+    document.querySelectorAll('input[name="audit-reason"]').forEach(r => r.checked = false);
+    document.querySelectorAll('input[name="responsibility"]').forEach(r => r.checked = false);
+    document.querySelectorAll('input[name="sign-status"]').forEach(r => r.checked = false);
+    document.getElementById('audit-remark').value = '';
 }
 
 function loadHistoryData() {
@@ -702,7 +740,10 @@ function generateAuditReport() {
     document.getElementById('report-severe-duration').textContent = summary.severe.duration + '分钟';
     document.getElementById('report-continuous-count').textContent = summary.continuous.count;
     document.getElementById('report-continuous-duration').textContent = summary.continuous.duration + '分钟';
-    document.getElementById('report-max-temp').textContent = summary.total.maxTemp ? summary.total.maxTemp.toFixed(1) + '℃' : '-';
+    document.getElementById('report-max-temp').textContent = 
+        summary.total.maxTemp !== undefined && summary.total.maxTemp !== null 
+            ? summary.total.maxTemp.toFixed(1) + '℃' 
+            : '-';
 
     document.getElementById('report-reason').textContent = reason.value;
     document.getElementById('report-responsibility').textContent = responsibility.value;
