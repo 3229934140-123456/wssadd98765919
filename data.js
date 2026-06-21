@@ -1,3 +1,5 @@
+const tempDataCache = {};
+
 const waybills = [
     {
         id: 'YD202406150001',
@@ -131,9 +133,34 @@ const waybills = [
     }
 ];
 
+function seededRandom(seed) {
+    let s = seed;
+    return function() {
+        s = Math.sin(s * 9999) * 9999;
+        return s - Math.floor(s);
+    };
+}
+
+function hashString(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return Math.abs(hash);
+}
+
 function generateTempData(waybillId) {
+    if (tempDataCache[waybillId]) {
+        return tempDataCache[waybillId];
+    }
+
     const waybill = waybills.find(w => w.id === waybillId);
     if (!waybill) return null;
+
+    const seed = hashString(waybillId);
+    const random = seededRandom(seed);
 
     const startTime = new Date(waybill.departure).getTime();
     const endTime = new Date(waybill.arrival).getTime();
@@ -147,45 +174,64 @@ function generateTempData(waybillId) {
     const tempRange = tempMax - tempMin;
     const baseTemp = tempMin + tempRange * 0.4;
 
+    const alertPeriods = getAlertPeriods(waybillId);
+
     for (let i = 0; i <= points; i++) {
         const time = startTime + i * interval * 60 * 1000;
-        let temp = baseTemp + Math.sin(i * 0.3) * (tempRange * 0.3);
-        temp += (Math.random() - 0.5) * (tempRange * 0.2);
+        let temp = baseTemp + Math.sin(i * 0.25 + seed * 0.001) * (tempRange * 0.25);
+        temp += (random() - 0.5) * (tempRange * 0.15);
 
-        if (waybill.id === 'YD202406150001') {
-            if (i >= 20 && i <= 25) {
-                temp = tempMax + 1.5 + Math.random() * 1;
-            }
-            if (i >= 50 && i <= 53) {
-                temp = tempMax + 0.8;
-            }
-        }
-
-        if (waybill.id === 'YD202406150003') {
-            if (i >= 15 && i <= 22) {
-                temp = tempMax + 2.5 + Math.random() * 2;
-            }
-            if (i >= 35 && i <= 40) {
-                temp = tempMax + 1.5;
-            }
-            if (i >= 45 && i <= 48) {
-                temp = tempMax + 3;
-            }
-        }
-
-        if (waybill.id === 'YD202406150004') {
-            if (i >= 40 && i <= 60) {
-                temp = tempMax + 2 + Math.random() * 3;
+        let inAlert = false;
+        let alertType = null;
+        for (const period of alertPeriods) {
+            if (i >= period.startIdx && i <= period.endIdx) {
+                inAlert = true;
+                alertType = period.type;
+                const alertProgress = (i - period.startIdx) / (period.endIdx - period.startIdx);
+                const peakFactor = Math.sin(alertProgress * Math.PI);
+                if (period.type === 'mild') {
+                    temp = tempMax + 0.5 + peakFactor * 1.5 + (random() - 0.5) * 0.3;
+                } else if (period.type === 'severe') {
+                    temp = tempMax + 2 + peakFactor * 3 + (random() - 0.5) * 0.5;
+                } else if (period.type === 'continuous') {
+                    temp = tempMax + 3 + peakFactor * 4 + (random() - 0.5) * 0.8;
+                }
+                break;
             }
         }
 
         data.push({
             time: new Date(time),
-            temp: Math.round(temp * 10) / 10
+            temp: Math.round(temp * 10) / 10,
+            inAlert: inAlert,
+            alertType: alertType
         });
     }
 
+    tempDataCache[waybillId] = data;
     return data;
+}
+
+function getAlertPeriods(waybillId) {
+    const waybill = waybills.find(w => w.id === waybillId);
+    if (!waybill) return [];
+
+    const alerts = getAlerts(waybillId);
+    const startTime = new Date(waybill.departure).getTime();
+    const interval = 5;
+
+    return alerts.map(alert => {
+        const startMs = new Date(alert.startTime).getTime();
+        const endMs = new Date(alert.endTime).getTime();
+        const startIdx = Math.floor((startMs - startTime) / (interval * 60 * 1000));
+        const endIdx = Math.floor((endMs - startTime) / (interval * 60 * 1000));
+        return {
+            type: alert.type,
+            startIdx: Math.max(0, startIdx),
+            endIdx: endIdx,
+            alert: alert
+        };
+    });
 }
 
 function getDoorRecords(waybillId) {
@@ -292,7 +338,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 10:40',
                 duration: '25分钟',
                 maxTemp: waybill.tempZone.max + 1.8,
-                description: '温度轻微超限，可能因开门装卸导致'
+                avgTemp: waybill.tempZone.max + 1.2,
+                description: '温度轻微超限，可能因开门装卸导致',
+                relatedDoors: ['郑州东服务区 10:15']
             },
             {
                 type: 'mild',
@@ -300,7 +348,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 12:55',
                 duration: '15分钟',
                 maxTemp: waybill.tempZone.max + 0.9,
-                description: '温度短暂上升，属正常波动范围'
+                avgTemp: waybill.tempZone.max + 0.6,
+                description: '温度短暂上升，属正常波动范围',
+                relatedDoors: ['漯河服务区 12:40']
             }
         ],
         'YD202406150002': [],
@@ -311,7 +361,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 06:45',
                 duration: '35分钟',
                 maxTemp: waybill.tempZone.max + 4.2,
-                description: '温度严重超限，需重点关注'
+                avgTemp: waybill.tempZone.max + 3.0,
+                description: '温度严重超限，装货后温度未及时降下来',
+                relatedDoors: ['济南服务区 06:10']
             },
             {
                 type: 'mild',
@@ -319,7 +371,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 07:55',
                 duration: '25分钟',
                 maxTemp: waybill.tempZone.max + 2.1,
-                description: '温度超限，可能与开门有关'
+                avgTemp: waybill.tempZone.max + 1.5,
+                description: '温度超限，可能与开门检查有关',
+                relatedDoors: ['泰安服务区 07:30']
             },
             {
                 type: 'severe',
@@ -327,7 +381,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 08:25',
                 duration: '15分钟',
                 maxTemp: waybill.tempZone.max + 3.5,
-                description: '温度再次严重超限'
+                avgTemp: waybill.tempZone.max + 2.8,
+                description: '温度再次严重超限，需关注制冷效果',
+                relatedDoors: []
             }
         ],
         'YD202406150004': [
@@ -337,7 +393,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-15 15:00',
                 duration: '1小时40分钟',
                 maxTemp: waybill.tempZone.max + 5.0,
-                description: '温度持续超限，疑似制冷设备故障'
+                avgTemp: waybill.tempZone.max + 3.8,
+                description: '温度持续超限，疑似制冷设备故障',
+                relatedDoors: []
             }
         ],
         'YD202406150005': [],
@@ -349,7 +407,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-14 08:10',
                 duration: '25分钟',
                 maxTemp: waybill.tempZone.max + 1.5,
-                description: '装卸货时开门导致温度短暂上升'
+                avgTemp: waybill.tempZone.max + 1.0,
+                description: '装卸货时开门导致温度短暂上升',
+                relatedDoors: ['常州服务区 07:45']
             }
         ],
         'YD202406140003': [
@@ -359,7 +419,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-14 11:15',
                 duration: '45分钟',
                 maxTemp: waybill.tempZone.max + 6.0,
-                description: '长时间开门装货导致温度大幅上升'
+                avgTemp: waybill.tempZone.max + 4.2,
+                description: '长时间开门装货导致温度大幅上升',
+                relatedDoors: ['青岛服务区 10:30']
             },
             {
                 type: 'mild',
@@ -367,7 +429,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-14 13:20',
                 duration: '20分钟',
                 maxTemp: waybill.tempZone.max + 1.8,
-                description: '中途停靠导致温度轻微上升'
+                avgTemp: waybill.tempZone.max + 1.2,
+                description: '中途停靠导致温度轻微上升',
+                relatedDoors: ['潍坊服务区 13:00']
             }
         ],
         'YD202406140004': [],
@@ -378,7 +442,9 @@ function getAlerts(waybillId) {
                 endTime: '2024-06-13 06:55',
                 duration: '15分钟',
                 maxTemp: waybill.tempZone.max + 1.2,
-                description: '中途检查开门导致温度轻微波动'
+                avgTemp: waybill.tempZone.max + 0.8,
+                description: '中途检查开门导致温度轻微波动',
+                relatedDoors: ['开封服务区 06:40']
             }
         ]
     };
@@ -416,4 +482,27 @@ function parseDuration(durationStr) {
     if (hourMatch) minutes += parseInt(hourMatch[1]) * 60;
     if (minMatch) minutes += parseInt(minMatch[1]);
     return minutes;
+}
+
+function getAuditRecord(waybillId) {
+    try {
+        const records = JSON.parse(localStorage.getItem('auditRecords') || '{}');
+        return records[waybillId] || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveAuditRecord(waybillId, record) {
+    try {
+        const records = JSON.parse(localStorage.getItem('auditRecords') || '{}');
+        records[waybillId] = {
+            ...record,
+            updatedAt: new Date().toISOString()
+        };
+        localStorage.setItem('auditRecords', JSON.stringify(records));
+        return true;
+    } catch (e) {
+        return false;
+    }
 }

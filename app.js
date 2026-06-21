@@ -5,12 +5,15 @@ let currentPageNum = 1;
 const pageSize = 5;
 let tempChart = null;
 let evidenceChart = null;
+let currentQuickFilter = 'all';
+let currentAlertIndex = -1;
 
 document.addEventListener('DOMContentLoaded', function() {
     initNavigation();
     renderWaybillList();
     updateStats();
     initDateFilter();
+    initModalClose();
 });
 
 function initNavigation() {
@@ -56,8 +59,35 @@ function navigateTo(page) {
 }
 
 function initDateFilter() {
-    const today = new Date().toISOString().split('T')[0];
     document.getElementById('filter-date').value = '2024-06-15';
+    applyFilters();
+}
+
+function initModalClose() {
+    const modal = document.getElementById('alert-modal');
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) {
+            closeAlertModal();
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeAlertModal();
+        }
+    });
+}
+
+function quickFilter(type) {
+    currentQuickFilter = type;
+    
+    document.querySelectorAll('.quick-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.dataset.filter === type) {
+            btn.classList.add('active');
+        }
+    });
+
+    applyFilters();
 }
 
 function applyFilters() {
@@ -71,6 +101,12 @@ function applyFilters() {
         if (meatType && w.meatType !== meatType) return false;
         if (plate && !w.plate.includes(plate)) return false;
         if (date && !w.departure.startsWith(date)) return false;
+
+        if (currentQuickFilter === 'mild' && w.alertStatus !== 'mild') return false;
+        if (currentQuickFilter === 'severe' && w.alertStatus !== 'severe') return false;
+        if (currentQuickFilter === 'continuous' && w.alertStatus !== 'continuous') return false;
+        if (currentQuickFilter === 'abnormal' && w.alertStatus === 'normal') return false;
+
         return true;
     });
 
@@ -84,6 +120,10 @@ function resetFilters() {
     document.getElementById('filter-meat-type').value = '';
     document.getElementById('filter-plate').value = '';
     document.getElementById('filter-date').value = '';
+    
+    currentQuickFilter = 'all';
+    document.querySelectorAll('.quick-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelector('.quick-btn[data-filter="all"]').classList.add('active');
 
     filteredWaybills = [...waybills];
     currentPageNum = 1;
@@ -123,9 +163,12 @@ function renderWaybillList() {
             'continuous': '持续超限'
         }[w.alertStatus] || '正常';
 
+        const auditRecord = getAuditRecord(w.id);
+        const auditedBadge = auditRecord ? '<span class="audited-badge">已稽核</span>' : '';
+
         return `
             <tr>
-                <td><strong>${w.id}</strong></td>
+                <td><strong>${w.id}</strong>${auditedBadge}</td>
                 <td>${w.customer}</td>
                 <td>${w.meatType}</td>
                 <td><span class="temp-zone ${w.tempZone.type}">${w.tempZone.label}</span></td>
@@ -184,9 +227,22 @@ function renderDetail() {
     
     document.getElementById('detail-duration').textContent = waybill.duration;
 
+    document.getElementById('chart-waybill-no').textContent = waybill.id;
+    document.getElementById('chart-gen-time').textContent = formatDateTimeFull(new Date());
+
     renderTempChart(waybill);
     renderTimeline(waybill);
     renderAlerts(waybill);
+}
+
+function formatDateTimeFull(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    const s = String(date.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }
 
 function renderTempChart(waybill) {
@@ -209,49 +265,80 @@ function renderTempChart(waybill) {
     const upperLimits = tempData.map(() => waybill.tempZone.max);
     const lowerLimits = tempData.map(() => waybill.tempZone.min);
 
-    const doorRecords = getDoorRecords(waybill.id);
-    
-    const doorAnnotations = doorRecords.map(door => {
-        const doorTime = new Date(door.time).getTime();
-        const idx = tempData.findIndex(d => d.time.getTime() >= doorTime);
-        return idx >= 0 ? idx : null;
-    }).filter(i => i !== null);
+    const alerts = getAlerts(waybill.id);
+    const alertDatasets = [];
+
+    alerts.forEach((alert, idx) => {
+        const alertData = tempData.map((d, i) => {
+            const inAlert = d.inAlert && d.alertType === alert.type;
+            return inAlert ? d.temp : null;
+        });
+
+        let borderColor, bgColor;
+        if (alert.type === 'mild') {
+            borderColor = '#f59e0b';
+            bgColor = 'rgba(245, 158, 11, 0.3)';
+        } else if (alert.type === 'severe') {
+            borderColor = '#ef4444';
+            bgColor = 'rgba(239, 68, 68, 0.3)';
+        } else {
+            borderColor = '#991b1b';
+            bgColor = 'rgba(153, 27, 27, 0.4)';
+        }
+
+        alertDatasets.push({
+            label: `超温${idx + 1}`,
+            data: alertData,
+            borderColor: borderColor,
+            backgroundColor: bgColor,
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 6,
+            borderWidth: 3,
+            pointHitRadius: 20,
+            alertIndex: idx
+        });
+    };
+
+    const datasets = [
+        {
+            label: '车厢温度',
+            data: temps,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            borderWidth: 2
+        },
+        {
+            label: '温度上限',
+            data: upperLimits,
+            borderColor: '#ef4444',
+            borderDash: [8, 4],
+            pointRadius: 0,
+            borderWidth: 2,
+            fill: false
+        },
+        {
+            label: '温度下限',
+            data: lowerLimits,
+            borderColor: '#10b981',
+            borderDash: [8, 4],
+            pointRadius: 0,
+            borderWidth: 2,
+            fill: false
+        },
+        ...alertDatasets
+    ];
 
     tempChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels: labels,
-            datasets: [
-                {
-                    label: '车厢温度',
-                    data: temps,
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    pointHoverRadius: 5,
-                    borderWidth: 2
-                },
-                {
-                    label: '温度上限',
-                    data: upperLimits,
-                    borderColor: '#ef4444',
-                    borderDash: [8, 4],
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    fill: false
-                },
-                {
-                    label: '温度下限',
-                    data: lowerLimits,
-                    borderColor: '#10b981',
-                    borderDash: [8, 4],
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    fill: false
-                }
-            ]
+            datasets: datasets
         },
         options: {
             responsive: true,
@@ -260,18 +347,46 @@ function renderTempChart(waybill) {
                 mode: 'index',
                 intersect: false
             },
+            onClick: function(e, elements) {
+                if (elements.length > 0) {
+                    const dataIndex = elements[0].index;
+                    const dataPoint = tempData[dataIndex];
+                    if (dataPoint && dataPoint.inAlert) {
+                        const alerts = getAlerts(waybill.id);
+                        const alertIdx = alerts.findIndex(a => {
+                            const startTime = new Date(a.startTime).getTime();
+                            const endTime = new Date(a.endTime).getTime();
+                            return dataPoint.time.getTime() >= startTime && dataPoint.time.getTime() <= endTime;
+                        });
+                        if (alertIdx >= 0) {
+                            showAlertModal(alertIdx);
+                        }
+                    }
+                }
+            },
             plugins: {
                 legend: {
                     display: false
                 },
                 tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)',
                     padding: 12,
                     titleFont: { size: 13 },
                     bodyFont: { size: 12 },
                     callbacks: {
                         label: function(context) {
+                            if (context.dataset.label.startsWith('超温')) {
+                                return null;
+                            }
                             return context.dataset.label + ': ' + context.parsed.y.toFixed(1) + '℃';
+                        },
+                        afterBody: function(context) {
+                            const dataIndex = context[0].dataIndex;
+                            const dataPoint = tempData[dataIndex];
+                            if (dataPoint && dataPoint.inAlert) {
+                                return ['🔴 超温中 - 点击查看详情'];
+                            }
+                            return [];
                         }
                     }
                 }
@@ -315,7 +430,9 @@ function renderTimeline(waybill) {
             time: stop.time,
             type: stop.type,
             title: stop.location,
-            desc: stop.desc
+            desc: stop.desc,
+            clickable: false,
+            alertIndex: -1
         });
     });
 
@@ -323,29 +440,38 @@ function renderTimeline(waybill) {
         items.push({
             time: door.time,
             type: 'door',
-            title: '开门记录',
-            desc: `${door.location}，持续 ${door.duration} 分钟`
+            title: '🚪 开门记录',
+            desc: `${door.location}，持续 ${door.duration} 分钟`,
+            clickable: false,
+            alertIndex: -1
         });
     });
 
-    alerts.forEach(alert => {
+    alerts.forEach((alert, idx) => {
         items.push({
             time: alert.startTime,
             type: 'alert',
-            title: getAlertTypeName(alert.type),
-            desc: `持续 ${alert.duration}，最高温度 ${alert.maxTemp.toFixed(1)}℃`
+            title: '⚠️ ' + getAlertTypeName(alert.type),
+            desc: `持续 ${alert.duration}，最高温度 ${alert.maxTemp.toFixed(1)}℃`,
+            clickable: true,
+            alertIndex: idx
         });
     });
 
     items.sort((a, b) => new Date(a.time) - new Date(b.time));
 
-    timeline.innerHTML = items.map(item => `
-        <div class="timeline-item ${item.type}">
-            <div class="timeline-time">${formatDateTime(item.time)}</div>
-            <div class="timeline-title">${item.title}</div>
-            <div class="timeline-desc">${item.desc}</div>
-        </div>
-    `).join('');
+    timeline.innerHTML = items.map((item, idx) => {
+        const clickClass = item.clickable ? 'clickable' : '';
+        const onClick = item.clickable ? `onclick="showAlertModal(${item.alertIndex})"` : '';
+        return `
+            <div class="timeline-item ${item.type} ${clickClass}" ${onClick} style="${item.clickable ? 'cursor: pointer;' : ''}">
+                <div class="timeline-time">${formatDateTime(item.time)}</div>
+                <div class="timeline-title">${item.title}</div>
+                <div class="timeline-desc">${item.desc}</div>
+                ${item.clickable ? '<div class="timeline-action">点击查看详情 →</div>' : ''}
+            </div>
+        `;
+    }).join('');
 }
 
 function getAlertTypeName(type) {
@@ -376,8 +502,8 @@ function renderAlerts(waybill) {
         return;
     }
 
-    alertsList.innerHTML = alerts.map(alert => `
-        <div class="alert-item ${alert.type}">
+    alertsList.innerHTML = alerts.map((alert, idx) => `
+        <div class="alert-item ${alert.type} clickable" onclick="showAlertModal(${idx})">
             <div class="alert-header">
                 <span class="alert-type">⚠️ ${getAlertTypeName(alert.type)}</span>
                 <span class="alert-time">${alert.startTime} ~ ${alert.endTime}</span>
@@ -389,8 +515,72 @@ function renderAlerts(waybill) {
             <div class="alert-details" style="margin-top: 6px; color: #6b7280;">
                 <span>${alert.description}</span>
             </div>
+            <div class="alert-action">点击查看详情 →</div>
         </div>
     `).join('');
+}
+
+function showAlertModal(alertIndex) {
+    const waybill = waybills.find(w => w.id === currentWaybillId);
+    if (!waybill) return;
+
+    const alerts = getAlerts(waybill.id);
+    const alert = alerts[alertIndex];
+    if (!alert) return;
+
+    currentAlertIndex = alertIndex;
+
+    document.getElementById('modal-alert-title').textContent = 
+        getAlertTypeName(alert.type) + ' - 详情';
+
+    const typeColors = {
+        'mild': 'color: #b45309;',
+        'severe': 'color: #dc2626;',
+        'continuous': 'color: #991b1b;'
+    };
+
+    document.getElementById('modal-alert-type').textContent = getAlertTypeName(alert.type);
+    document.getElementById('modal-alert-type').style.cssText = typeColors[alert.type] || '';
+    document.getElementById('modal-alert-start').textContent = alert.startTime;
+    document.getElementById('modal-alert-end').textContent = alert.endTime;
+    document.getElementById('modal-alert-duration').textContent = alert.duration;
+    document.getElementById('modal-alert-max').textContent = alert.maxTemp.toFixed(1) + '℃';
+    document.getElementById('modal-alert-avg').textContent = alert.avgTemp ? alert.avgTemp.toFixed(1) + '℃';
+    document.getElementById('modal-alert-desc').textContent = alert.description;
+
+    const doorsHtml = alert.relatedDoors && alert.relatedDoors.length > 0
+        ? alert.relatedDoors.map(door => `
+            <div class="related-door-item">
+                <span class="related-door-icon">🚪</span>
+                <span>${door}</span>
+            </div>
+        `).join('')
+        : '<span class="no-related">暂无关联开门记录</span>';
+    document.getElementById('modal-related-doors').innerHTML = doorsHtml;
+
+    const stops = getStops(waybill.id);
+    const alertStartTime = new Date(alert.startTime).getTime();
+    const nearbyStops = stops.filter(s => {
+        const stopTime = new Date(s.time).getTime();
+        return Math.abs(stopTime - alertStartTime) < 30 * 60 * 1000;
+    });
+
+    const stopsHtml = nearbyStops.length > 0
+        ? nearbyStops.map(stop => `
+            <div class="related-stop-item">
+                <span class="related-door-icon">📍</span>
+                <span>${stop.location} - ${formatDateTime(stop.time)}</span>
+            </div>
+        `).join('')
+        : '<span class="no-related">暂无附近停靠记录</span>';
+    document.getElementById('modal-related-stops').innerHTML = stopsHtml;
+
+    document.getElementById('alert-modal').style.display = 'flex';
+}
+
+function closeAlertModal() {
+    document.getElementById('alert-modal').style.display = 'none';
+    currentAlertIndex = -1;
 }
 
 function goToAudit() {
@@ -415,10 +605,51 @@ function renderAuditForm() {
     document.getElementById('audit-form').style.display = 'block';
     document.getElementById('audit-report').style.display = 'none';
 
-    document.querySelectorAll('input[name="audit-reason"]').forEach(r => r.checked = false);
-    document.querySelectorAll('input[name="responsibility"]').forEach(r => r.checked = false);
-    document.querySelectorAll('input[name="sign-status"]').forEach(r => r.checked = false);
-    document.getElementById('audit-remark').value = '';
+    const historyRecord = getAuditRecord(waybill.id);
+    const historySection = document.getElementById('history-section');
+    
+    if (historyRecord) {
+        historySection.style.display = 'block';
+        document.getElementById('history-reason').textContent = historyRecord.reason || '-';
+        document.getElementById('history-responsibility').textContent = historyRecord.responsibility || '-';
+        document.getElementById('history-sign-status').textContent = historyRecord.signStatus || '-';
+        document.getElementById('history-remark').textContent = historyRecord.remark || '无';
+        document.getElementById('history-updated').textContent = 
+            historyRecord.updatedAt ? formatDateTimeFull(new Date(historyRecord.updatedAt)) : '-';
+    } else {
+        historySection.style.display = 'none';
+    }
+
+    if (!historyRecord) {
+        document.querySelectorAll('input[name="audit-reason"]').forEach(r => r.checked = false);
+        document.querySelectorAll('input[name="responsibility"]').forEach(r => r.checked = false);
+        document.querySelectorAll('input[name="sign-status"]').forEach(r => r.checked = false);
+        document.getElementById('audit-remark').value = '';
+    }
+}
+
+function loadHistoryData() {
+    const historyRecord = getAuditRecord(currentWaybillId);
+    if (!historyRecord) return;
+
+    const reasonRadios = document.querySelectorAll('input[name="audit-reason"]');
+    reasonRadios.forEach(r => {
+        if (r.value === historyRecord.reason) r.checked = true;
+    });
+
+    const respRadios = document.querySelectorAll('input[name="responsibility"]');
+    respRadios.forEach(r => {
+        if (r.value === historyRecord.responsibility) r.checked = true;
+    });
+
+    const signRadios = document.querySelectorAll('input[name="sign-status"]');
+    signRadios.forEach(r => {
+        if (r.value === historyRecord.signStatus) r.checked = true;
+    });
+
+    document.getElementById('audit-remark').value = historyRecord.remark || '';
+
+    document.getElementById('history-section').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function generateAuditReport() {
@@ -442,14 +673,21 @@ function generateAuditReport() {
 
     const waybill = waybills.find(w => w.id === currentWaybillId);
     const summary = getAlertSummary(waybill.id);
-    const today = new Date();
-    const auditNo = 'JH' + today.getFullYear() + 
-        String(today.getMonth() + 1).padStart(2, '0') +
-        String(today.getDate()).padStart(2, '0') +
+    const now = new Date();
+    const auditNo = 'JH' + now.getFullYear() + 
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') +
         Math.floor(Math.random() * 10000).toString().padStart(4, '0');
 
+    saveAuditRecord(currentWaybillId, {
+        reason: reason.value,
+        responsibility: responsibility.value,
+        signStatus: signStatus.value,
+        remark: remark
+    });
+
     document.getElementById('report-no').textContent = auditNo;
-    document.getElementById('report-audit-date').textContent = formatDate(today);
+    document.getElementById('report-audit-date').textContent = formatDate(now);
     document.getElementById('report-waybill-no').textContent = waybill.id;
     document.getElementById('report-customer').textContent = waybill.customer;
     document.getElementById('report-meat-type').textContent = waybill.meatType;
@@ -470,7 +708,7 @@ function generateAuditReport() {
     document.getElementById('report-responsibility').textContent = responsibility.value;
     document.getElementById('report-sign-status').textContent = signStatus.value;
     document.getElementById('report-remark').textContent = remark || '无';
-    document.getElementById('report-sign-date').textContent = formatDate(today);
+    document.getElementById('report-sign-date').textContent = formatDate(now);
 
     document.getElementById('audit-form').style.display = 'none';
     document.getElementById('audit-report').style.display = 'block';
@@ -563,6 +801,18 @@ function renderEvidenceChart(waybill) {
             }
         }
     });
+
+    const chartContainer = document.getElementById('evidence-chart-container');
+    let metaDiv = chartContainer.querySelector('.report-chart-meta');
+    if (!metaDiv) {
+        metaDiv = document.createElement('div');
+        metaDiv.className = 'report-chart-meta';
+        chartContainer.appendChild(metaDiv);
+    }
+    metaDiv.innerHTML = `
+        <span>运单号：${waybill.id}</span>
+        <span>生成时间：${formatDateTimeFull(new Date())}</span>
+    `;
 }
 
 function formatDate(date) {
@@ -607,4 +857,10 @@ function downloadReport() {
         console.error('生成PDF失败:', err);
         alert('生成PDF失败，请重试');
     });
+}
+
+function backToEdit() {
+    document.getElementById('audit-form').style.display = 'block';
+    document.getElementById('audit-report').style.display = 'none';
+    window.scrollTo(0, 0);
 }

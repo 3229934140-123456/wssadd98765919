@@ -69,8 +69,18 @@
                     </div>
                 </div>
                 <div class="filter-actions">
-                    <button class="btn btn-primary" onclick="applyFilters()">查询</button>
-                    <button class="btn btn-secondary" onclick="resetFilters()">重置</button>
+                    <div class="quick-filters">
+                        <span class="quick-filter-label">快速筛选：</span>
+                        <button class="quick-btn" data-filter="all" onclick="quickFilter('all')">全部</button>
+                        <button class="quick-btn warning" data-filter="mild" onclick="quickFilter('mild')">轻微超限</button>
+                        <button class="quick-btn danger" data-filter="severe" onclick="quickFilter('severe')">严重超限</button>
+                        <button class="quick-btn critical" data-filter="continuous" onclick="quickFilter('continuous')">持续超限</button>
+                        <button class="quick-btn abnormal" data-filter="abnormal" onclick="quickFilter('abnormal')">今日异常</button>
+                    </div>
+                    <div class="filter-buttons">
+                        <button class="btn btn-secondary" onclick="resetFilters()">重置</button>
+                        <button class="btn btn-primary" onclick="applyFilters()">查询</button>
+                    </div>
                 </div>
             </div>
 
@@ -173,7 +183,13 @@
 
             <div class="chart-card" id="chart-section">
                 <div class="chart-header">
-                    <h3>温度变化曲线</h3>
+                    <div>
+                        <h3>温度变化曲线</h3>
+                        <div class="chart-meta">
+                            <span class="meta-item">运单号：<strong id="chart-waybill-no">-</strong></span>
+                            <span class="meta-item">数据生成时间：<strong id="chart-gen-time">-</strong></span>
+                        </div>
+                    </div>
                     <div class="chart-legend">
                         <span class="legend-item"><span class="legend-dot temp-line"></span>车厢温度</span>
                         <span class="legend-item"><span class="legend-dot upper-limit"></span>温度上限</span>
@@ -181,8 +197,9 @@
                         <span class="legend-item"><span class="legend-dot door-open"></span>开门记录</span>
                     </div>
                 </div>
-                <div class="chart-container">
+                <div class="chart-container" style="position: relative;">
                     <canvas id="tempChart"></canvas>
+                    <div class="chart-tip">💡 点击超温片段可查看详细信息</div>
                 </div>
             </div>
 
@@ -214,6 +231,38 @@
             </div>
 
             <div class="audit-form" id="audit-form">
+                <div class="form-section history-section" id="history-section" style="display: none;">
+                    <div class="section-header">
+                        <h3>📋 历史稽核记录</h3>
+                        <span class="history-badge">最近修改</span>
+                    </div>
+                    <div class="history-record">
+                        <div class="history-grid">
+                            <div class="history-item">
+                                <span class="history-label">稽核原因</span>
+                                <span class="history-value" id="history-reason">-</span>
+                            </div>
+                            <div class="history-item">
+                                <span class="history-label">责任建议</span>
+                                <span class="history-value" id="history-responsibility">-</span>
+                            </div>
+                            <div class="history-item">
+                                <span class="history-label">签收状态</span>
+                                <span class="history-value" id="history-sign-status">-</span>
+                            </div>
+                            <div class="history-item">
+                                <span class="history-label">最后修改</span>
+                                <span class="history-value" id="history-updated">-</span>
+                            </div>
+                        </div>
+                        <div class="history-remark">
+                            <span class="history-label">补充说明：</span>
+                            <span class="history-value" id="history-remark">-</span>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" onclick="loadHistoryData()">📝 载入历史记录继续编辑</button>
+                    </div>
+                </div>
+
                 <div class="form-section">
                     <h3>基本信息</h3>
                     <div class="form-grid">
@@ -353,9 +402,14 @@
             <div class="audit-report" id="audit-report" style="display: none;">
                 <div class="report-header">
                     <h3>温区稽核单</h3>
-                    <button class="btn btn-primary" onclick="downloadReport()">
-                        📄 下载稽核单
-                    </button>
+                    <div class="report-actions">
+                        <button class="btn btn-secondary" onclick="backToEdit()">
+                            ← 返回修改
+                        </button>
+                        <button class="btn btn-primary" onclick="downloadReport()">
+                            📄 下载稽核单
+                        </button>
+                    </div>
                 </div>
                 <div class="report-content" id="report-content">
                     <div class="report-title">
@@ -470,5 +524,62 @@
 
     <script src="data.js"></script>
     <script src="app.js"></script>
+
+    <div class="modal-overlay" id="alert-modal" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modal-alert-title">超温详情</h3>
+                <button class="modal-close" onclick="closeAlertModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="modal-info-grid">
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">超温类型</span>
+                        <span class="modal-info-value" id="modal-alert-type">-</span>
+                    </div>
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">开始时间</span>
+                        <span class="modal-info-value" id="modal-alert-start">-</span>
+                    </div>
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">结束时间</span>
+                        <span class="modal-info-value" id="modal-alert-end">-</span>
+                    </div>
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">持续时长</span>
+                        <span class="modal-info-value" id="modal-alert-duration">-</span>
+                    </div>
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">最高温度</span>
+                        <span class="modal-info-value" id="modal-alert-max">-</span>
+                    </div>
+                    <div class="modal-info-item">
+                        <span class="modal-info-label">平均温度</span>
+                        <span class="modal-info-value" id="modal-alert-avg">-</span>
+                    </div>
+                </div>
+                <div class="modal-section">
+                    <h4>超温描述</h4>
+                    <p id="modal-alert-desc">-</p>
+                </div>
+                <div class="modal-section">
+                    <h4>关联开门记录</h4>
+                    <div class="related-doors" id="modal-related-doors">
+                        <span class="no-related">暂无关联开门记录</span>
+                    </div>
+                </div>
+                <div class="modal-section">
+                    <h4>附近停靠点</h4>
+                    <div class="related-stops" id="modal-related-stops">
+                        <span class="no-related">暂无附近停靠记录</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeAlertModal()">关闭</button>
+                <button class="btn btn-primary" onclick="closeAlertModal(); goToAudit();">开始稽核</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
