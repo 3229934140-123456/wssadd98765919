@@ -400,6 +400,13 @@
                     <textarea id="audit-remark" class="remark-textarea" placeholder="请输入稽核补充说明，详细描述超温原因分析及处理建议..."></textarea>
                 </div>
 
+                <div class="form-section review-notes-section">
+                    <h3>📝 复盘备注</h3>
+                    <p class="section-desc">针对整票运单的总复盘结论，返回修改后内容不丢失</p>
+                    <textarea id="review-notes" class="remark-textarea review-textarea" 
+                        placeholder="请输入整票运单的复盘结论，例如：本票运单整体温区控制良好，个别超温段为装卸开门所致，已与承运商确认改进措施..."></textarea>
+                </div>
+
                 <div class="form-section">
                     <h3>责任建议</h3>
                     <div class="responsibility-options">
@@ -559,6 +566,11 @@
                                 <span class="conclusion-value" id="report-remark">-</span>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="report-section" id="report-review-section" style="display: none;">
+                        <h4>复盘备注</h4>
+                        <div class="report-review-notes" id="report-review-notes">-</div>
                     </div>
 
                     <div class="report-section">

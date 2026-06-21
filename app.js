@@ -827,6 +827,7 @@ function clearFormValues() {
     document.querySelectorAll('input[name="responsibility"]').forEach(r => r.checked = false);
     document.querySelectorAll('input[name="sign-status"]').forEach(r => r.checked = false);
     document.getElementById('audit-remark').value = '';
+    document.getElementById('review-notes').value = '';
 }
 
 function clearSelectedEvidence() {
@@ -859,6 +860,8 @@ function toggleAlertEvidence(alertIndex) {
             alertTypeName: getAlertTypeName(alert.type),
             startTime: alert.startTime,
             endTime: alert.endTime,
+            startTs: new Date(alert.startTime).getTime(),
+            endTs: new Date(alert.endTime).getTime(),
             duration: alert.duration,
             durationMinutes: parseDuration(alert.duration),
             maxTemp: alert.maxTemp,
@@ -867,7 +870,8 @@ function toggleAlertEvidence(alertIndex) {
             relatedDoors: alert.relatedDoors || [],
             reason: '',
             responsibility: '',
-            remark: ''
+            remark: '',
+            isKey: false
         });
     }
 
@@ -903,29 +907,84 @@ function renderEvidenceList() {
         return;
     }
 
-    listEl.innerHTML = selectedEvidence.map((ev, idx) => {
+    const sorted = getSortedEvidence();
+    const reasonOptions = ['设备波动', '装卸开门', '运输异常', '无法判定'];
+    const respOptions = ['承运商责任', '发货方责任', '不可抗力', '无责任'];
+
+    listEl.innerHTML = sorted.map((ev, idx) => {
         const typeClass = ev.type === 'alert' ? ev.alertType : 'custom';
         const tempInfo = ev.type === 'alert'
             ? `最高 ${ev.maxTemp.toFixed(1)}℃ · ${ev.duration}`
             : `最高 ${ev.maxTemp.toFixed(1)}℃ · 平均 ${ev.avgTemp.toFixed(1)}℃ · ${ev.duration}`;
-        
+        const keyLabel = ev.isKey ? '⭐ 关键证据' : '☆ 标为关键';
+        const keyClass = ev.isKey ? 'btn-key-active' : 'btn-key';
+
         return `
-            <div class="evidence-item ${typeClass}">
+            <div class="evidence-item ${typeClass} ${ev.isKey ? 'is-key' : ''}" data-evidence-id="${ev.id}">
                 <div class="evidence-header">
                     <span class="evidence-title">
                         <span class="evidence-icon">${ev.type === 'alert' ? '⚠️' : '📊'}</span>
                         证据${idx + 1}：${ev.alertTypeName}
                     </span>
-                    <button class="evidence-remove" onclick="removeEvidence('${ev.id}')" title="移除">×</button>
+                    <div class="evidence-actions">
+                        <button class="btn btn-xs ${keyClass}" onclick="toggleKeyEvidence('${ev.id}')" title="标记关键">${keyLabel}</button>
+                        <button class="evidence-remove" onclick="removeEvidence('${ev.id}')" title="移除">×</button>
+                    </div>
                 </div>
                 <div class="evidence-time">${ev.startTime} ~ ${ev.endTime}</div>
                 <div class="evidence-stats">${tempInfo}</div>
                 ${ev.relatedDoors && ev.relatedDoors.length > 0 
                     ? `<div class="evidence-doors">🚪 关联开门：${ev.relatedDoors.join('、')}</div>` 
                     : ''}
+                <div class="evidence-judgment">
+                    <div class="judgment-row">
+                        <label>原因：</label>
+                        <select class="ev-select" onchange="updateEvidenceField('${ev.id}','reason',this.value)">
+                            <option value="">-- 请选择 --</option>
+                            ${reasonOptions.map(r => `<option value="${r}" ${ev.reason === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="judgment-row">
+                        <label>责任：</label>
+                        <select class="ev-select" onchange="updateEvidenceField('${ev.id}','responsibility',this.value)">
+                            <option value="">-- 请选择 --</option>
+                            ${respOptions.map(r => `<option value="${r}" ${ev.responsibility === r ? 'selected' : ''}>${r}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="judgment-row">
+                        <label>说明：</label>
+                        <input type="text" class="ev-input" value="${ev.remark || ''}" 
+                            placeholder="简短说明..." 
+                            onchange="updateEvidenceField('${ev.id}','remark',this.value)">
+                    </div>
+                </div>
             </div>
         `;
     }).join('');
+}
+
+function getSortedEvidence() {
+    const sorted = [...selectedEvidence].sort((a, b) => {
+        if (a.isKey && !b.isKey) return -1;
+        if (!a.isKey && b.isKey) return 1;
+        return a.startTs - b.startTs;
+    });
+    return sorted;
+}
+
+function updateEvidenceField(evidenceId, field, value) {
+    const ev = selectedEvidence.find(e => e.id === evidenceId);
+    if (ev) {
+        ev[field] = value;
+    }
+}
+
+function toggleKeyEvidence(evidenceId) {
+    const ev = selectedEvidence.find(e => e.id === evidenceId);
+    if (ev) {
+        ev.isKey = !ev.isKey;
+    }
+    renderEvidenceList();
 }
 
 function removeEvidence(evidenceId) {
@@ -962,6 +1021,8 @@ function addSelectionToEvidence() {
     if (!waybill) return;
 
     const tempData = generateTempData(waybill.id);
+    const s = Math.min(selectionStartIndex, selectionEndIndex);
+    const e = Math.max(selectionStartIndex, selectionEndIndex);
     const stats = calcSelectionStats(waybill.id, selectionStartIndex, selectionEndIndex);
 
     const evidence = {
@@ -969,8 +1030,10 @@ function addSelectionToEvidence() {
         type: 'custom',
         alertType: 'custom',
         alertTypeName: '框选时段',
-        startTime: formatDateTimeFull(tempData[selectionStartIndex].time),
-        endTime: formatDateTimeFull(tempData[selectionEndIndex].time),
+        startTime: formatDateTimeFull(tempData[s].time),
+        endTime: formatDateTimeFull(tempData[e].time),
+        startTs: tempData[s].time.getTime(),
+        endTs: tempData[e].time.getTime(),
         duration: stats.durationText,
         durationMinutes: stats.durationMinutes,
         maxTemp: stats.maxTemp,
@@ -981,7 +1044,8 @@ function addSelectionToEvidence() {
         description: '主管框选复盘时段',
         reason: '',
         responsibility: '',
-        remark: ''
+        remark: '',
+        isKey: false
     };
 
     selectedEvidence.push(evidence);
@@ -1052,6 +1116,7 @@ function loadHistoryData() {
     });
 
     document.getElementById('audit-remark').value = historyRecord.remark || '';
+    document.getElementById('review-notes').value = historyRecord.reviewNotes || '';
 
     if (historyRecord.evidence && Array.isArray(historyRecord.evidence)) {
         selectedEvidence = JSON.parse(JSON.stringify(historyRecord.evidence));
@@ -1090,11 +1155,14 @@ function generateAuditReport() {
         String(now.getDate()).padStart(2, '0') +
         Math.floor(Math.random() * 10000).toString().padStart(4, '0');
 
+    const reviewNotes = document.getElementById('review-notes').value.trim();
+
     saveAuditRecord(currentWaybillId, {
         reason: reason.value,
         responsibility: responsibility.value,
         signStatus: signStatus.value,
         remark: remark,
+        reviewNotes: reviewNotes,
         evidence: JSON.parse(JSON.stringify(selectedEvidence))
     });
 
@@ -1125,7 +1193,15 @@ function generateAuditReport() {
     document.getElementById('report-remark').textContent = remark || '无';
     document.getElementById('report-sign-date').textContent = formatDate(now);
 
-    renderReportEvidence(reason.value, responsibility.value);
+    const reviewSection = document.getElementById('report-review-section');
+    if (reviewNotes) {
+        reviewSection.style.display = 'block';
+        document.getElementById('report-review-notes').textContent = reviewNotes;
+    } else {
+        reviewSection.style.display = 'none';
+    }
+
+    renderReportEvidence();
 
     document.getElementById('audit-form').style.display = 'none';
     document.getElementById('audit-report').style.display = 'block';
@@ -1135,7 +1211,7 @@ function generateAuditReport() {
     }, 100);
 }
 
-function renderReportEvidence(reason, responsibility) {
+function renderReportEvidence() {
     const listEl = document.getElementById('report-evidence-list');
     if (!listEl) return;
 
@@ -1144,31 +1220,56 @@ function renderReportEvidence(reason, responsibility) {
         return;
     }
 
-    listEl.innerHTML = selectedEvidence.map((ev, idx) => {
-        const typeClass = ev.type === 'alert' ? ev.alertType : 'custom';
-        const tempStats = ev.type === 'alert'
-            ? `最高温度：${ev.maxTemp.toFixed(1)}℃ · 持续：${ev.duration}`
-            : `最高温度：${ev.maxTemp.toFixed(1)}℃ · 最低温度：${ev.minTemp.toFixed(1)}℃ · 平均温度：${ev.avgTemp.toFixed(1)}℃ · 持续：${ev.duration}`;
-        
-        return `
-            <div class="report-evidence-item ${typeClass}">
-                <div class="report-evidence-header">
-                    <span class="report-evidence-title">
-                        证据${idx + 1}：${ev.alertTypeName}
-                    </span>
-                </div>
-                <div class="report-evidence-time">时间段：${ev.startTime} ~ ${ev.endTime}</div>
-                <div class="report-evidence-stats">${tempStats}</div>
-                ${ev.relatedDoors && ev.relatedDoors.length > 0 
-                    ? `<div class="report-evidence-doors">关联开门：${ev.relatedDoors.join('、')}</div>` 
-                    : ''}
-                <div class="report-evidence-conclusion">
-                    <span>原因判断：${reason}</span>
-                    <span style="margin-left: 24px;">责任建议：${responsibility}</span>
-                </div>
+    const sorted = getSortedEvidence();
+    const keyEvidences = sorted.filter(e => e.isKey);
+    const normalEvidences = sorted.filter(e => !e.isKey);
+
+    let html = '';
+
+    if (keyEvidences.length > 0) {
+        html += '<div class="evidence-group-title">⭐ 关键证据</div>';
+        html += keyEvidences.map((ev, idx) => renderSingleReportEvidence(ev, idx + 1)).join('');
+    }
+
+    if (normalEvidences.length > 0) {
+        if (keyEvidences.length > 0) {
+            html += '<div class="evidence-group-title">普通证据</div>';
+        }
+        const startIdx = keyEvidences.length + 1;
+        html += normalEvidences.map((ev, idx) => renderSingleReportEvidence(ev, startIdx + idx)).join('');
+    }
+
+    listEl.innerHTML = html;
+}
+
+function renderSingleReportEvidence(ev, idx) {
+    const typeClass = ev.type === 'alert' ? ev.alertType : 'custom';
+    const tempStats = ev.type === 'alert'
+        ? `最高温度：${ev.maxTemp.toFixed(1)}℃ · 持续：${ev.duration}`
+        : `最高温度：${ev.maxTemp.toFixed(1)}℃ · 最低温度：${ev.minTemp.toFixed(1)}℃ · 平均温度：${ev.avgTemp.toFixed(1)}℃ · 持续：${ev.duration}`;
+    const reasonText = ev.reason || '未指定';
+    const respText = ev.responsibility || '未指定';
+    const remarkText = ev.remark || '';
+    
+    return `
+        <div class="report-evidence-item ${typeClass} ${ev.isKey ? 'is-key' : ''}">
+            <div class="report-evidence-header">
+                <span class="report-evidence-title">
+                    ${ev.isKey ? '⭐ ' : ''}证据${idx}：${ev.alertTypeName}
+                </span>
             </div>
-        `;
-    }).join('');
+            <div class="report-evidence-time">时间段：${ev.startTime} ~ ${ev.endTime}</div>
+            <div class="report-evidence-stats">${tempStats}</div>
+            ${ev.relatedDoors && ev.relatedDoors.length > 0 
+                ? `<div class="report-evidence-doors">关联开门：${ev.relatedDoors.join('、')}</div>` 
+                : ''}
+            <div class="report-evidence-conclusion">
+                <div>原因判断：${reasonText}</div>
+                <div>责任建议：${respText}</div>
+                ${remarkText ? `<div>说明：${remarkText}</div>` : ''}
+            </div>
+        </div>
+    `;
 }
 
 function renderEvidenceChart(waybill) {
