@@ -22,7 +22,7 @@
             <nav class="main-nav">
                 <button class="nav-btn active" data-page="list">运单列表</button>
                 <button class="nav-btn" data-page="detail">温区曲线</button>
-                <button class="nav-btn" data-page="audit">稽核结论</button>
+                <button class="nav-btn" data-page="audit">稽核结论 <span class="nav-badge" id="evidence-count-badge" style="display: none;">0</span></button>
             </nav>
             <div class="user-info">
                 <span class="user-role">质控主管</span>
@@ -199,7 +199,47 @@
                 </div>
                 <div class="chart-container" style="position: relative;">
                     <canvas id="tempChart"></canvas>
-                    <div class="chart-tip">💡 点击超温片段可查看详细信息</div>
+                    <div class="chart-tip">💡 点击超温片段查看详情，拖拽框选时间段做复盘</div>
+                </div>
+                <div class="selection-panel" id="selection-panel" style="display: none;">
+                    <div class="selection-header">
+                        <h4>📊 框选时段统计</h4>
+                        <button class="btn-close" onclick="clearSelection()">×</button>
+                    </div>
+                    <div class="selection-stats">
+                        <div class="stat-item">
+                            <span class="stat-label">时段</span>
+                            <span class="stat-value" id="sel-time-range">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">持续</span>
+                            <span class="stat-value" id="sel-duration">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">最高温</span>
+                            <span class="stat-value" id="sel-max-temp" style="color: #dc2626;">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">最低温</span>
+                            <span class="stat-value" id="sel-min-temp" style="color: #10b981;">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">平均温</span>
+                            <span class="stat-value" id="sel-avg-temp">-</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">超温次数</span>
+                            <span class="stat-value" id="sel-alert-count">-</span>
+                        </div>
+                    </div>
+                    <div class="selection-doors" id="sel-doors-section" style="display: none;">
+                        <span class="doors-label">🚪 关联开门：</span>
+                        <span id="sel-doors-list">-</span>
+                    </div>
+                    <div class="selection-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="clearSelection()">取消</button>
+                        <button class="btn btn-sm btn-primary" onclick="addSelectionToEvidence()">➕ 加入稽核证据</button>
+                    </div>
                 </div>
             </div>
 
@@ -303,6 +343,16 @@
                         <div class="alert-summary-item total">
                             <span class="alert-count" id="total-alert-count">0</span>
                             <span class="alert-label">累计超温时长</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h3>📎 稽核证据 <span class="evidence-count" id="audit-evidence-count">(0段)</span></h3>
+                    <div class="evidence-list" id="evidence-list">
+                        <div class="evidence-empty">
+                            <p>暂无选中的证据</p>
+                            <p class="evidence-empty-desc">前往温区曲线页，点击超温记录或框选时段加入证据</p>
                         </div>
                     </div>
                 </div>
@@ -483,7 +533,14 @@
                     </div>
 
                     <div class="report-section">
-                        <h4>四、稽核结论</h4>
+                        <h4>四、稽核证据详情</h4>
+                        <div class="report-evidence-list" id="report-evidence-list">
+                            <p style="color: #9ca3af;">无选中证据</p>
+                        </div>
+                    </div>
+
+                    <div class="report-section">
+                        <h4>五、稽核结论</h4>
                         <div class="conclusion-box">
                             <div class="conclusion-item">
                                 <span class="conclusion-label">稽核原因：</span>
@@ -505,7 +562,7 @@
                     </div>
 
                     <div class="report-section">
-                        <h4>五、稽核人员</h4>
+                        <h4>六、稽核人员</h4>
                         <div class="signatures">
                             <div class="signature-item">
                                 <span>稽核人：</span>

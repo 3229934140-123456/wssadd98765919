@@ -183,10 +183,13 @@ function generateTempData(waybillId) {
 
         let inAlert = false;
         let alertType = null;
-        for (const period of alertPeriods) {
+        let alertIndex = -1;
+        for (let pi = 0; pi < alertPeriods.length; pi++) {
+            const period = alertPeriods[pi];
             if (i >= period.startIdx && i <= period.endIdx) {
                 inAlert = true;
                 alertType = period.type;
+                alertIndex = pi;
                 const alertProgress = (i - period.startIdx) / (period.endIdx - period.startIdx);
                 const peakFactor = Math.sin(alertProgress * Math.PI);
                 if (period.type === 'mild') {
@@ -204,7 +207,8 @@ function generateTempData(waybillId) {
             time: new Date(time),
             temp: Math.round(temp * 10) / 10,
             inAlert: inAlert,
-            alertType: alertType
+            alertType: alertType,
+            alertIndex: alertIndex
         });
     }
 
